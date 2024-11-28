@@ -12,7 +12,7 @@ import shutil
 
 RULES_CSV = "MicrosoftSentinel.csv"
 BATCH_SIZE = 20
-TEMPLATE_DIR = "rules"
+STATS_FOLDER = "rules"
 
 
 def format_rule(r: dict[str, str]):
@@ -55,17 +55,17 @@ with open(RULES_CSV, encoding="utf-8-sig") as f:
 
 
 try:
-    os.makedirs(TEMPLATE_DIR)
+    os.makedirs(STATS_FOLDER)
 except OSError:
-    shutil.rmtree(TEMPLATE_DIR)
-    os.makedirs(TEMPLATE_DIR)
+    shutil.rmtree(STATS_FOLDER)
+    os.makedirs(STATS_FOLDER)
 
 start, stop = 0, BATCH_SIZE
 while True:
     if not (rules := formated_rules[start:stop]):
         break
 
-    rules_file = pathlib.PurePath(TEMPLATE_DIR, f"Rules_{start + 1}-{stop + 1}.md")
+    rules_file = pathlib.PurePath(STATS_FOLDER, f"Rules_{start + 1}-{stop + 1}.md")
     with open(rules_file, "w", encoding="utf-8-sig") as f:  # utf-8 with BOOM
         f.write(f"# Rules: {start + 1}-{stop + 1}\n")
         for r in rules:

@@ -1,0 +1,142 @@
+// Failed login Count 
+// Resources with most failed log in attempts. 
+SigninLogs
+| where ResultType !=0
+| summarize FailedLoginCount=count() by ResourceDisplayName
+| sort by FailedLoginCount desc nulls last
+
+// Failed MFA challenge 
+// Highlights sign in failures caused by failed MFA challenge. 
+SigninLogs
+| where ResultType == 50074
+| project UserDisplayName, Identity,UserPrincipalName, ResultDescription,  AppDisplayName, AppId, ResourceDisplayName
+| summarize FailureCount=count(), FailedResources=dcount(ResourceDisplayName), ResultDescription=any(ResultDescription) by UserDisplayName
+
+// Failed Signin reasons 
+// The query list the main reasons for sign in failures. 
+SigninLogs
+| where ResultType != 0
+| summarize Count=count() by ResultDescription, ResultType
+| sort by Count desc nulls last
+
+// Failed Linux User Password Change 
+// Lists computers wih failed Linux user password change. 
+Syslog
+| where Facility == 'authpriv' and ((SyslogMessage has 'passwd:chauthtok' and SyslogMessage has 'authentication failure') or SyslogMessage has 'password change failed')
+| summarize count() by Computer
+
+// Group Membership changed. 
+let group = '<insert your group>';
+IdentityDirectoryEvents
+| where ActionType == 'Group Membership changed'
+| extend AddedToGroup = AdditionalFields['TO.GROUP']
+| extend RemovedFromGroup = AdditionalFields['FROM.GROUP']
+| extend TargetAccount = AdditionalFields['TARGET_OBJECT.USER']
+| where AddedToGroup == group or RemovedFromGroup == group
+| project-reorder Timestamp, ActionType, AddedToGroup, RemovedFromGroup, TargetAccount
+| limit 100
+
+// High risk users 
+// Gets list of the top 100 at high risk users for the last day. 
+AADRiskyUsers
+| where RiskLastUpdatedDateTime > ago(1d)
+| where RiskLevel == "high"
+| where RiskState == "atRisk"
+| take 100
+
+
+// LDAP authentication processes with cleartext passwords 
+// Find processes that performed LDAP authentication with cleartext passwords. 
+IdentityLogonEvents
+| where Protocol == "LDAP" //and isnotempty(AccountName)
+| project LogonTime = Timestamp, DeviceName, Application, ActionType, LogonType //,AccountName
+| join kind=inner (
+DeviceNetworkEvents
+| where ActionType == "ConnectionSuccess"
+| extend DeviceName = toupper(trim(@"\..*$",DeviceName))
+| where RemotePort == "389"
+| project NetworkConnectionTime = Timestamp, DeviceName, AccountName = InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessCommandLine
+) on DeviceName
+| where LogonTime - NetworkConnectionTime between (-2m .. 2m)
+| project Application, LogonType, ActionType, LogonTime, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine //, AccountName
+| limit 100
+
+
+// Locked Accounts 
+// Counts locked acounts by target account. 
+SecurityEvent
+| where EventID == 4740
+| summarize count() by TargetAccount
+
+// Logins To Resource 
+// Lists API sign ins. 
+SigninLogs
+| where ResourceDisplayName == "Windows Azure Service Management API"
+| project TimeGenerated, UserDisplayName, Identity,UserPrincipalName,  AppDisplayName, Success=iff(ResultType==0, "Success", "Fail")
+
+// Logon Activity by Account 
+SecurityEvent
+| where EventID == 4624
+| summarize LogonCount = count() by Account
+
+// Logon Activity by Device 
+// Counts logon activities per device. 
+SecurityEvent
+| where EventID == 4624
+| summarize LogonCount = count() by Computer
+
+// Logons with clear text password by target account. 
+SecurityEvent
+| where EventID == 4624 and LogonType == 8
+| summarize count() by TargetAccount
+
+
+
+// Most active ip addresses 
+// Get list of top 100 most active IP addresses for the last day. 
+AADNonInteractiveUserSignInLogs
+| where TimeGenerated > ago(1d)
+| summarize CountPerIPAddress = count() by IPAddress
+| order by CountPerIPAddress desc
+| take 100
+
+
+// Password change event 
+// Find the latest password change event for a specific account. 
+let userAccount = '<insert your user account>';
+let deviceAccount = 'insert your device account';
+IdentityDirectoryEvents
+| where ActionType == 'Account Password changed'
+| where TargetAccountDisplayName == userAccount
+//If you are looking for last password change of a device account comment the above row and remove comment from the below row
+//| where TargetDeviceName == deviceAccount
+| summarize LastPasswordChangeTime = max(Timestamp) by TargetAccountDisplayName // or change to TargetDeviceName for devcie account
+
+
+// Resources accessed by user 
+// Lists the resources accessed for a specific user. 
+// Set v_Users_UPN with the UPN of the user of interest
+let v_Users_UPN = "osotnoc@contoso.com";
+SigninLogs
+| where UserPrincipalName == v_Users_UPN
+| summarize Count=count()  by ResourceDisplayName, AppDisplayName
+
+// Users with multiple cities 
+// Get list of users that signed in from multiple cities for the last day. 
+AADNonInteractiveUserSignInLogs
+| where TimeGenerated > ago(1d)
+| extend City = parse_json(LocationDetails).city
+| summarize CountPerCity = dcount(tostring(City)) by UserId
+| where CountPerCity > 1
+| order by CountPerCity desc
+
+// Uses of clear text password 
+// List all accounts that logged on using a clear-text password over the last day. 
+// To create an alert for this query, click '+ New alert rule'
+SecurityEvent
+| where EventID == 4624 // event ID 4624: "an account was successfully logged on",
+| where LogonType == 8 // logon type 8: "NetworkCleartext"
+| summarize count() by TargetAccount, Computer, _ResourceId // count the reported security events for each account
+// This query requires the Security solution
+
+
